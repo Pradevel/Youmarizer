@@ -1,109 +1,128 @@
-import yt_dlp as youtube_dl
-import speech_recognition as sr
-from transformers import pipeline
 import os
-import subprocess
+import threading
+import wave
+
+import yt_dlp
+import speech_recognition as sr
+import json
+from vosk import Model, KaldiRecognizer
+from pydub import AudioSegment
+
+model_path = "./vosk-model-small-en-us-0.15"
+model = Model("./vosk-model-small-en-us-0.15")
+
+def resample_audio(input_file, output_file, target_sample_rate=16000):
+    audio = AudioSegment.from_wav(input_file)
+    audio = audio.set_frame_rate(target_sample_rate)
+    audio.export(output_file, format="wav")
+
+def split_audio(input_file, chunk_length_ms, output_dir):
+    audio = AudioSegment.from_wav(input_file)
+    duration_ms = len(audio)
+    chunk_count = duration_ms // chunk_length_ms + (1 if duration_ms % chunk_length_ms > 0 else 0)
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    chunks = []
+    for i in range(chunk_count):
+        start = i * chunk_length_ms
+        end = start + chunk_length_ms
+        chunk = audio[start:end]
+        chunk_file = os.path.join(output_dir, f"chunk_{i}.wav")
+        chunk.export(chunk_file, format="wav")
+        convert_to_mono(chunk_file, chunk_file)
+        resample_audio(chunk_file, chunk_file)
+        chunks.append(chunk_file)
+
+    return chunks
 
 
-def download_audio(url, base_filename="audio"):
+def recognize_speech_from_chunk(chunk_file, model, result_queue):
+    with wave.open(chunk_file, "rb") as wf:
+        if wf.getnchannels() != 1:
+            raise ValueError("Audio file must be mono")
+
+        recognizer = KaldiRecognizer(model, wf.getframerate())
+        recognized_text = ""
+
+        while True:
+            data = wf.readframes(4000)
+            if len(data) == 0:
+                break
+            if recognizer.AcceptWaveform(data):
+                result = recognizer.Result()
+                recognized_text += json.loads(result)["text"] + " "
+
+        final_result = json.loads(recognizer.FinalResult())
+        recognized_text += final_result.get("text", "")
+
+    result_queue.append(recognized_text)
+
+
+def process_audio(input_file, model_path, chunk_length_ms=60000):
+    model = Model(model_path)
+    output_dir = "chunks"
+    chunks = split_audio(input_file, chunk_length_ms, output_dir)
+
+    result_queue = []
+    threads = []
+    for chunk_file in chunks:
+        thread = threading.Thread(target=recognize_speech_from_chunk, args=(chunk_file, model, result_queue))
+        threads.append(thread)
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    # Combine results
+    full_text = " ".join(result_queue)
+    return full_text
+
+
+
+def convert_to_mono(input_audio, output_audio):
+    sound = AudioSegment.from_file(input_audio)
+    mono_sound = sound.set_channels(1)
+    mono_sound.export(output_audio, format="wav")
+
+def recognize_speech_from_audio(wav_file):
+    with wave.open(wav_file, "rb") as wf:
+        if wf.getnchannels() != 1:
+            return "Audio file must be mono"
+
+        recognizer = KaldiRecognizer(model, wf.getframerate())
+        recognized_text = ""
+        while True:
+            data = wf.readframes(4000)
+            if len(data) == 0:
+                break
+            if recognizer.AcceptWaveform(data):
+                result = recognizer.Result()
+                recognized_text += json.loads(result)["text"] + " "
+
+        final_result = json.loads(recognizer.FinalResult())
+        recognized_text += final_result.get("text", "")
+
+    return recognized_text
+
+def download_video_as_mp3(url, output_path):
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': base_filename,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
+            'preferredcodec': 'wav',
             'preferredquality': '192',
         }],
-        'verbose': True,
+        'outtmpl': output_path + 'audio',
     }
-    try:
-        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
 
-        mp3_file = f"{base_filename}.mp3"
-        if not os.path.exists(mp3_file):
-            raise FileNotFoundError(f"Expected file {mp3_file} was not created.")
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
 
-        return mp3_file
-    except Exception as e:
-        print(f"Error downloading audio: {e}")
-        return None
-
-
-def convert_mp3_to_wav(mp3_file, wav_file="audio.wav"):
-    if not os.path.exists(mp3_file):
-        print(f"MP3 file {mp3_file} does not exist. Conversion cannot proceed.")
-        return
-
-    try:
-        subprocess.run([
-            'ffmpeg', '-i', mp3_file,
-            '-ar', '16000', '-ac', '1',
-            wav_file
-        ], check=True)
-        print(f"Converted {mp3_file} to {wav_file}")
-
-        # Check if the WAV file was generated and log its size
-        if os.path.exists(wav_file):
-            wav_size = os.path.getsize(wav_file)
-            print(f"WAV file generated: {wav_file}, Size: {wav_size} bytes")
-        else:
-            print(f"WAV file {wav_file} was not generated.")
-
-    except subprocess.CalledProcessError as e:
-        print(f"Error converting MP3 to WAV: {e}")
-
-
-def transcribe_audio(audio_file):
-    if not os.path.exists(audio_file):
-        print(f"Audio file {audio_file} does not exist.")
-        return ""
-
-    recognizer = sr.Recognizer()
-    try:
-        print(f"Starting transcription of {audio_file}")
-        with sr.AudioFile(audio_file) as source:
-            audio = recognizer.record(source)
-            text = recognizer.recognize_google(audio)
-            print("Transcription successful!")
-            return text
-    except sr.RequestError:
-        print("API unavailable or unresponsive")
-    except sr.UnknownValueError:
-        print("Unable to recognize speech")
-    except Exception as e:
-        print(f"Error during transcription: {e}")
-    return ""
-
-
-def summarize_text(text):
-    summarizer = pipeline("summarization", model="facebook/bart-small")
-    summary = summarizer(text, max_length=150, min_length=50, do_sample=False)
-    return summary[0]['summary_text']
-
-
-def process_audio(youtube_url):
-    mp3_file = download_audio(youtube_url)
-    if mp3_file:
-        convert_mp3_to_wav(mp3_file)
-
-        # Add a check to see if the WAV file exists before transcribing
-        wav_file = "audio.wav"
-        if os.path.exists(wav_file):
-            transcription = transcribe_audio(wav_file)
-            if transcription:
-                summary = summarize_text(transcription)
-                print("Summary:\n", summary)
-        else:
-            print(f"WAV file {wav_file} not found, skipping transcription.")
-
-
-# Main execution
-youtube_url = "https://www.youtube.com/watch?v=oFeSRI8TcwI"
-process_audio(youtube_url)
-
-# Clean up files
-if os.path.exists("audio.mp3"):
-    os.remove("audio.mp3")
-if os.path.exists("audio.wav"):
-    os.remove("audio.wav")
+video_url = 'https://www.youtube.com/watch?v=u4hBRjym-A4'
+output_path = ''
+download_video_as_mp3(video_url, output_path)
+print("Now recognizing")
+text = process_audio('audio.wav', model_path)
+print(text)
