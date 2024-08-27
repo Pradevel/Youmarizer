@@ -1,21 +1,24 @@
+import io
+import json
 import os
 import threading
 import wave
-import json
-from tqdm import tqdm
-from pydub import AudioSegment
-from queue import Queue
-from vosk import Model, KaldiRecognizer
 from contextlib import redirect_stdout, redirect_stderr
-import io
+from queue import Queue
+
+from pydub import AudioSegment
+from tqdm import tqdm
+from vosk import Model, KaldiRecognizer
 
 model_path = "./vosk-model-small-en-us-0.15"
 model = Model(model_path)
+
 
 def resample_audio(input_file, output_file, target_sample_rate=16000):
     audio = AudioSegment.from_wav(input_file)
     audio = audio.set_frame_rate(target_sample_rate)
     audio.export(output_file, format="wav")
+
 
 def split_audio(input_file, chunk_length_ms, output_dir):
     audio = AudioSegment.from_wav(input_file)
@@ -37,6 +40,7 @@ def split_audio(input_file, chunk_length_ms, output_dir):
         chunks.append(chunk_file)
 
     return chunks
+
 
 def recognize_speech_from_chunk(chunk_files, chunk_indices, result_queue):
     for chunk_file, index in zip(chunk_files, chunk_indices):
@@ -60,6 +64,7 @@ def recognize_speech_from_chunk(chunk_files, chunk_indices, result_queue):
                 recognized_text += final_result.get("text", "")
 
         result_queue.put((index, recognized_text))
+
 
 def process_audio(input_file, chunk_length_ms=60000, num_threads=5):
     output_dir = "chunks"
@@ -90,10 +95,12 @@ def process_audio(input_file, chunk_length_ms=60000, num_threads=5):
         full_text = " ".join(filter(None, sorted_results))
     return full_text
 
+
 def convert_to_mono(input_audio, output_audio):
     sound = AudioSegment.from_file(input_audio)
     mono_sound = sound.set_channels(1)
     mono_sound.export(output_audio, format="wav")
+
 
 def download_video_as_wav(url, output_file="audio"):
     import yt_dlp

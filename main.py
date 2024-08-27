@@ -1,8 +1,9 @@
-import os
+from colorama import Fore, Style
+
 from audio_processing import download_video_as_wav, process_audio
 from speech_recognition import extract_keypoints
 from text_processing import summarize_text, print_with_scroll
-from colorama import Fore, Style
+
 
 def main():
     video_url = input(Fore.CYAN + "Enter the YouTube video URL: " + Style.RESET_ALL)
@@ -17,7 +18,7 @@ def main():
     print(Fore.GREEN + "Transcription complete. Generating summary..." + Style.RESET_ALL)
     summary = summarize_text(text)
 
-    print_with_scroll(summary)
+    print_with_scroll(Fore.WHITE + summary + Style.RESET_ALL)
 
     print(Fore.GREEN + "Extracting key points..." + Style.RESET_ALL)
     keyphrases = extract_keypoints(summary)

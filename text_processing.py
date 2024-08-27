@@ -1,7 +1,8 @@
-from transformers import pipeline
 from colorama import Fore, Style
+from transformers import pipeline
 
 summarizer = pipeline("summarization")
+
 
 def summarize_text(text, max_chunk_length=1024):
     def split_text(text, max_length):
@@ -15,6 +16,7 @@ def summarize_text(text, max_chunk_length=1024):
 
     full_summary = " ".join(summaries)
     return full_summary
+
 
 def print_with_scroll(text):
     print(Fore.YELLOW + "Summary:" + Style.RESET_ALL)

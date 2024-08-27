@@ -1,12 +1,13 @@
+import io
 import json
 import wave
+from contextlib import redirect_stdout, redirect_stderr
 
 from vosk import Model, KaldiRecognizer
-from contextlib import redirect_stdout, redirect_stderr
-import io
 
 model_path = "./vosk-model-small-en-us-0.15"
 model = Model(model_path)
+
 
 def extract_keypoints(text, max_chunk_length=1024):
     from transformers import pipeline
@@ -23,6 +24,7 @@ def extract_keypoints(text, max_chunk_length=1024):
 
     full_keypoints = " ".join(keypoints)
     return full_keypoints
+
 
 def recognize_speech_from_chunk(chunk_files, chunk_indices, result_queue):
     for chunk_file, index in zip(chunk_files, chunk_indices):
