@@ -6,7 +6,15 @@ from contextlib import redirect_stdout, redirect_stderr
 from vosk import Model, KaldiRecognizer
 
 model_path = "./vosk-model-small-en-us-0.15"
-model = Model(model_path)
+
+def suppress_logs(func, *args, **kwargs):
+    with io.StringIO() as stdout, io.StringIO() as stderr, redirect_stdout(stdout), redirect_stderr(stderr):
+        return func(*args, **kwargs)
+
+def load_model():
+    return suppress_logs(lambda: Model(model_path))
+
+model = load_model()
 
 
 def extract_keypoints(text, max_chunk_length=1024):
